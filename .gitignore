@@ -1,0 +1,58 @@
+# --- General & OS ---
+.DS_Store
+Thumbs.db
+*.log
+
+# --- IDE Settings ---
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# --- Environment Variables (CRITICAL) ---
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+*.env
+
+# --- Docker ---
+# If you map volumes locally that generate data
+postgres_data/
+redis_data/
+
+# =========================
+# FRONTEND (Node/Next.js)
+# =========================
+frontend/node_modules/
+frontend/.next/
+frontend/out/
+frontend/build/
+frontend/dist/
+frontend/.vercel/
+frontend/*.tsbuildinfo
+frontend/npm-debug.log*
+frontend/yarn-debug.log*
+frontend/yarn-error.log*
+frontend/pnpm-debug.log*
+
+# =========================
+# BACKEND (Python/FastAPI)
+# =========================
+backend/__pycache__/
+backend/app/__pycache__/
+backend/*.py[cod]
+backend/*$py.class
+backend/venv/
+backend/.venv/
+backend/env/
+backend/.pytest_cache/
+backend/.coverage
+backend/htmlcov/
+backend/site-packages/
+
+# --- App Specific ---
+# Temporary generated images should not be committed
+backend/temp/
+backend/outputs/
