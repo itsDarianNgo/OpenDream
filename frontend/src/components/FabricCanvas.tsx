@@ -3,27 +3,33 @@
 import React, { useEffect, useRef, useState } from 'react';
 import * as fabric from 'fabric';
 
-// Interface for the controller object we return to the parent
 export interface CanvasController {
     clearMask: () => void;
     getCanvasData: () => Promise<{ image: string; mask: string } | null>;
     setResultImage: (dataUrl: string) => Promise<void>;
+    discardResult: () => void;
+    commitResult: () => void;
+    toggleCompare: (showOriginal: boolean) => void;
+    downloadCanvas: () => void;
 }
 
 interface FabricCanvasProps {
     tool: 'select' | 'brush' | 'pan';
-    onLoaded: (controller: CanvasController) => void; // <--- NEW HANDSHAKE PROP
+    onLoaded: (controller: CanvasController) => void;
 }
 
 export default function FabricCanvas({ tool, onLoaded }: FabricCanvasProps) {
     const canvasEl = useRef<HTMLCanvasElement>(null);
     const containerRef = useRef<HTMLDivElement>(null);
     const canvasInstance = useRef<fabric.Canvas | null>(null);
+
+    // References to key objects
     const baseImageRef = useRef<fabric.FabricImage | null>(null);
+    const tempResultRef = useRef<fabric.FabricImage | null>(null);
 
     const [status, setStatus] = useState("Init");
 
-    // 1. Define the API we want to expose
+    // API Definition
     const api: CanvasController = {
         clearMask: () => {
             if (!canvasInstance.current) return;
@@ -37,7 +43,6 @@ export default function FabricCanvas({ tool, onLoaded }: FabricCanvasProps) {
             if (!canvasInstance.current || !baseImageRef.current) return null;
             const canvas = canvasInstance.current;
 
-            // Snapshot logic
             const strokes = canvas.getObjects().filter(o => o.type === 'path');
             strokes.forEach(s => s.visible = false);
             const imageBase64 = canvas.toDataURL({ format: 'png', multiplier: 1 });
@@ -61,35 +66,69 @@ export default function FabricCanvas({ tool, onLoaded }: FabricCanvasProps) {
             try {
                 const img = await fabric.FabricImage.fromURL(dataUrl);
                 const canvasWidth = canvas.width!;
+
+                // Scale and position
                 img.scaleToWidth(canvasWidth);
-                canvas.add(img);
                 canvas.centerObject(img);
-                img.selectable = true;
-                img.evented = true;
-                canvas.setActiveObject(img);
+
+                // Lock it for Review Mode
+                img.selectable = false;
+                img.evented = false;
+
+                canvas.add(img);
+                tempResultRef.current = img; // Track it
                 canvas.requestRenderAll();
             } catch (e) { console.error(e); }
+        },
+        discardResult: () => {
+            if (!canvasInstance.current || !tempResultRef.current) return;
+            canvasInstance.current.remove(tempResultRef.current);
+            tempResultRef.current = null;
+            canvasInstance.current.requestRenderAll();
+        },
+        commitResult: () => {
+            if (!canvasInstance.current || !tempResultRef.current) return;
+            // Make it permanent and movable
+            const img = tempResultRef.current;
+            img.selectable = true;
+            img.evented = true;
+
+            // If we want to replace the base image, we could do:
+            // baseImageRef.current = img;
+            // But for layers, let's just leave it on top.
+
+            tempResultRef.current = null; // No longer temporary
+            canvasInstance.current.setActiveObject(img);
+            canvasInstance.current.requestRenderAll();
+        },
+        toggleCompare: (showOriginal: boolean) => {
+            if (!canvasInstance.current || !tempResultRef.current) return;
+            // If showOriginal is true, we HIDE the result
+            tempResultRef.current.visible = !showOriginal;
+            canvasInstance.current.requestRenderAll();
+        },
+        downloadCanvas: () => {
+            if (!canvasInstance.current) return;
+            const link = document.createElement('a');
+            link.download = `opendream-${Date.now()}.png`;
+            link.href = canvasInstance.current.toDataURL({ format: 'png', multiplier: 2 }); // High Quality
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
         }
     };
 
-    // 2. Initialize & Tool Logic
+    // Init Logic (Standard)
     useEffect(() => {
-        if (!canvasEl.current || !containerRef.current) return;
-        if (canvasInstance.current) return; // Prevent double init
+        if (!canvasEl.current || !containerRef.current || canvasInstance.current) return;
 
-        console.log("🚀 Initializing Fabric Engine...");
         const canvas = new fabric.Canvas(canvasEl.current, {
             width: containerRef.current.clientWidth,
             height: containerRef.current.clientHeight,
             backgroundColor: '#1e1e1e',
         });
         canvasInstance.current = canvas;
-
-        // Send the API back to parent immediately
-        if (onLoaded) {
-            console.log("🤝 Sending Handshake to Parent");
-            onLoaded(api);
-        }
+        if (onLoaded) onLoaded(api);
 
         // Resize
         const resizeObserver = new ResizeObserver(() => {
@@ -101,7 +140,7 @@ export default function FabricCanvas({ tool, onLoaded }: FabricCanvasProps) {
         });
         resizeObserver.observe(containerRef.current);
 
-        // Events
+        // Zoom
         canvas.on('mouse:wheel', function(opt) {
             const delta = opt.e.deltaY;
             let zoom = canvas.getZoom();
@@ -113,6 +152,7 @@ export default function FabricCanvas({ tool, onLoaded }: FabricCanvasProps) {
             opt.e.stopPropagation();
         });
 
+        // Pan
         let isDragging = false;
         let lastPosX = 0;
         let lastPosY = 0;
@@ -151,13 +191,12 @@ export default function FabricCanvas({ tool, onLoaded }: FabricCanvasProps) {
         };
     }, []);
 
-    // 3. React to Prop Changes (Tool Switch)
+    // Tool Logic (Standard)
     useEffect(() => {
         const canvas = canvasInstance.current;
         if (!canvas) return;
 
         setStatus(tool.toUpperCase());
-        console.log(`Tool switch: ${tool}`);
 
         if (tool === 'brush') {
             canvas.isDrawingMode = true;
@@ -168,19 +207,13 @@ export default function FabricCanvas({ tool, onLoaded }: FabricCanvasProps) {
             brush.width = 30;
             canvas.freeDrawingBrush = brush;
             canvas.defaultCursor = 'crosshair';
-            canvas.getObjects().forEach(obj => {
-                obj.selectable = false;
-                obj.evented = false;
-            });
+            canvas.getObjects().forEach(obj => { obj.selectable = false; obj.evented = false; });
         }
         else if (tool === 'pan') {
             canvas.isDrawingMode = false;
             canvas.selection = false;
             canvas.defaultCursor = 'grab';
-            canvas.getObjects().forEach(obj => {
-                obj.selectable = false;
-                obj.evented = false;
-            });
+            canvas.getObjects().forEach(obj => { obj.selectable = false; obj.evented = false; });
         }
         else {
             canvas.isDrawingMode = false;
@@ -188,24 +221,23 @@ export default function FabricCanvas({ tool, onLoaded }: FabricCanvasProps) {
             canvas.defaultCursor = 'default';
             canvas.getObjects().forEach(obj => {
                 if (obj.type === 'image') {
+                    // If we are in review mode (tempResult exists), we might want to keep things locked?
+                    // But the parent controls the 'tool', so we assume if tool=select, we want interaction.
+                    // The tempResult logic in setSelectable handles its own locking.
                     obj.selectable = true;
                     obj.evented = true;
                 } else {
-                    // strokes
-                    obj.selectable = false;
-                    obj.evented = false;
+                    obj.selectable = false; obj.evented = false;
                 }
             });
         }
         canvas.requestRenderAll();
     }, [tool]);
 
-    // Drop Handler
     const handleDrop = async (e: React.DragEvent) => {
         e.preventDefault();
         e.stopPropagation();
         if (!canvasInstance.current) return;
-
         const file = e.dataTransfer.files[0];
         if (file && file.type.startsWith('image/')) {
             const reader = new FileReader();
@@ -218,7 +250,6 @@ export default function FabricCanvas({ tool, onLoaded }: FabricCanvasProps) {
                     const canvasWidth = canvasInstance.current!.width!;
                     const canvasHeight = canvasInstance.current!.height!;
                     const scale = Math.min((canvasWidth * 0.8) / img.width!, (canvasHeight * 0.8) / img.height!);
-
                     img.scale(scale);
                     canvasInstance.current!.centerObject(img);
                     canvasInstance.current!.add(img);
