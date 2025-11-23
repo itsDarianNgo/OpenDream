@@ -64,7 +64,7 @@ export default function ActionCenter() {
 
     const handleDiscard = () => {
         canvasController?.discardResult();
-        setIsEditing(false);
+        setIsEditing(true);
         setReviewMode(false);
     };
 

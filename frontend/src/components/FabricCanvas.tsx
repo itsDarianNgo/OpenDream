@@ -96,9 +96,13 @@ export default function FabricCanvas({ isPainting, onLoaded }: FabricCanvasProps
         const canvasWidth = container.clientWidth;
         const canvasHeight = container.clientHeight;
 
+        const scaledWidth = image.getScaledWidth?.() ?? image.width ?? 0;
+        const scaledHeight = image.getScaledHeight?.() ?? image.height ?? 0;
+        if (!scaledWidth || !scaledHeight) return;
+
         canvas.setDimensions({ width: canvasWidth, height: canvasHeight });
 
-        const minZoom = Math.min(canvasWidth / image.width!, canvasHeight / image.height!);
+        const minZoom = Math.min(canvasWidth / scaledWidth, canvasHeight / scaledHeight);
         minZoomRef.current = minZoom;
 
         const viewport: fabric.TMat2D = [
@@ -106,8 +110,8 @@ export default function FabricCanvas({ isPainting, onLoaded }: FabricCanvasProps
             0,
             0,
             minZoom,
-            (canvasWidth - image.width! * minZoom) / 2,
-            (canvasHeight - image.height! * minZoom) / 2,
+            (canvasWidth - scaledWidth * minZoom) / 2,
+            (canvasHeight - scaledHeight * minZoom) / 2,
         ];
 
         canvas.setViewportTransform(viewport);
@@ -289,20 +293,19 @@ export default function FabricCanvas({ isPainting, onLoaded }: FabricCanvasProps
             const canvas = canvasInstance.current;
             try {
                 const img = await fabric.FabricImage.fromURL(dataUrl);
-                const baseRect = getBaseImageRect();
                 const baseObj = baseImageRef.current;
-                if (baseRect && baseObj) {
-                    const scaleX = baseRect.width / img.width!;
-                    const scaleY = baseRect.height / img.height!;
-                    const scale = Math.min(scaleX, scaleY);
+                if (baseObj) {
+                    const center = baseObj.getCenterPoint();
+                    const baseScaleX = (baseObj.width ?? img.width!) * (baseObj.scaleX ?? 1) / img.width!;
+                    const baseScaleY = (baseObj.height ?? img.height!) * (baseObj.scaleY ?? 1) / img.height!;
                     img.set({
-                        left: baseRect.left + baseRect.width / 2,
-                        top: baseRect.top + baseRect.height / 2,
+                        left: center.x,
+                        top: center.y,
                         originX: 'center',
                         originY: 'center',
-                        scaleX: scale,
-                        scaleY: scale,
-                        angle: 0,
+                        scaleX: baseScaleX,
+                        scaleY: baseScaleY,
+                        angle: baseObj.angle ?? 0,
                     });
                     img.setCoords();
                 } else {
@@ -334,8 +337,12 @@ export default function FabricCanvas({ isPainting, onLoaded }: FabricCanvasProps
 
             // 2. Finalize Image
             const img = tempResultRef.current;
+            if (baseImageRef.current && baseImageRef.current !== img) {
+                canvas.remove(baseImageRef.current);
+            }
             img.selectable = false;
             img.evented = false;
+            canvas.sendObjectToBack(img);
             tempResultRef.current = null;
             baseImageRef.current = img;
             fitImageToViewport();
