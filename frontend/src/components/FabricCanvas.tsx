@@ -2,15 +2,18 @@
 
 import React, { useEffect, useRef, useState } from 'react';
 import * as fabric from 'fabric';
+import { useEditorStore } from '../store/useEditorStore';
 
 export interface CanvasController {
     clearMask: () => void;
     getCanvasData: () => Promise<{ image: string; mask: string } | null>;
     setResultImage: (dataUrl: string) => Promise<void>;
     discardResult: () => void;
-    commitResult: () => void;
+    commitResult: () => void; // Now handles clearing mask too
     toggleCompare: (showOriginal: boolean) => void;
     downloadCanvas: () => void;
+    undo: () => void;
+    redo: () => void;
 }
 
 interface FabricCanvasProps {
@@ -22,61 +25,157 @@ export default function FabricCanvas({ tool, onLoaded }: FabricCanvasProps) {
     const canvasEl = useRef<HTMLCanvasElement>(null);
     const containerRef = useRef<HTMLDivElement>(null);
     const canvasInstance = useRef<fabric.Canvas | null>(null);
-
-    // References to key objects
     const baseImageRef = useRef<fabric.FabricImage | null>(null);
     const tempResultRef = useRef<fabric.FabricImage | null>(null);
 
+    const history = useRef<string[]>([]);
+    const historyIndex = useRef<number>(-1);
+    const isHistoryLocked = useRef(false);
+
+    const setHistoryState = useEditorStore((state) => state.setHistoryState);
     const [status, setStatus] = useState("Init");
+
+    // --- HISTORY ENGINE ---
+    const saveState = () => {
+        if (isHistoryLocked.current || !canvasInstance.current) return;
+
+        // Serialize
+        const jsonObject = canvasInstance.current.toObject(['selectable', 'evented', 'id', 'type']);
+        const jsonString = JSON.stringify(jsonObject);
+
+        // Deduplication Check: Don't save if identical to last state
+        if (historyIndex.current >= 0 && history.current[historyIndex.current] === jsonString) {
+            return;
+        }
+
+        if (historyIndex.current < history.current.length - 1) {
+            history.current = history.current.slice(0, historyIndex.current + 1);
+        }
+
+        history.current.push(jsonString);
+        historyIndex.current++;
+
+        if (history.current.length > 10) {
+            history.current.shift();
+            historyIndex.current--;
+        }
+
+        updateHistoryUI();
+    };
+
+    const updateHistoryUI = () => {
+        const canUndo = historyIndex.current > 0;
+        const canRedo = historyIndex.current < history.current.length - 1;
+        setHistoryState(canUndo, canRedo);
+    };
+
+    const loadHistoryState = async (index: number) => {
+        if (!canvasInstance.current) return;
+        isHistoryLocked.current = true;
+
+        try {
+            const json = history.current[index];
+            await canvasInstance.current.loadFromJSON(JSON.parse(json));
+            canvasInstance.current.requestRenderAll();
+
+            // Re-apply tool settings logic since JSON load wipes it
+            applyToolSettings(tool);
+
+            historyIndex.current = index;
+            updateHistoryUI();
+        } catch (e) {
+            console.error("History Load Error:", e);
+        } finally {
+            isHistoryLocked.current = false;
+        }
+    };
+
+    const applyToolSettings = (currentTool: string) => {
+        const canvas = canvasInstance.current;
+        if (!canvas) return;
+
+        if (currentTool === 'brush') {
+            canvas.isDrawingMode = true;
+            canvas.selection = false;
+            canvas.discardActiveObject();
+            const brush = new fabric.PencilBrush(canvas);
+            brush.color = 'rgba(255, 0, 0, 0.5)';
+            brush.width = 30;
+            canvas.freeDrawingBrush = brush;
+            canvas.defaultCursor = 'crosshair';
+            canvas.getObjects().forEach(o => { o.selectable = false; o.evented = false; });
+        } else if (currentTool === 'pan') {
+            canvas.isDrawingMode = false;
+            canvas.selection = false;
+            canvas.defaultCursor = 'grab';
+            canvas.getObjects().forEach(o => { o.selectable = false; o.evented = false; });
+        } else {
+            canvas.isDrawingMode = false;
+            canvas.selection = true;
+            canvas.defaultCursor = 'default';
+            canvas.getObjects().forEach(o => {
+                if (o.type === 'image') { o.selectable = true; o.evented = true; }
+                else { o.selectable = false; o.evented = false; }
+            });
+        }
+        canvas.requestRenderAll();
+    };
 
     // API Definition
     const api: CanvasController = {
+        undo: () => {
+            if (historyIndex.current > 0) loadHistoryState(historyIndex.current - 1);
+        },
+        redo: () => {
+            if (historyIndex.current < history.current.length - 1) loadHistoryState(historyIndex.current + 1);
+        },
         clearMask: () => {
+            // This is now mostly for the eraser button
             if (!canvasInstance.current) return;
             const canvas = canvasInstance.current;
             canvas.getObjects().forEach(obj => {
                 if (obj.type === 'path') canvas.remove(obj);
             });
+            saveState();
             canvas.requestRenderAll();
         },
         getCanvasData: async () => {
-            if (!canvasInstance.current || !baseImageRef.current) return null;
+            // ... same data extraction logic ...
+            if (!canvasInstance.current) return null;
             const canvas = canvasInstance.current;
+            const images = canvas.getObjects().filter(o => o.type === 'image');
+            if (images.length === 0) return null;
 
             const strokes = canvas.getObjects().filter(o => o.type === 'path');
             strokes.forEach(s => s.visible = false);
             const imageBase64 = canvas.toDataURL({ format: 'png', multiplier: 1 });
 
-            baseImageRef.current.visible = false;
+            const allObjects = canvas.getObjects();
+            allObjects.forEach(o => o.visible = false);
             strokes.forEach(s => { s.visible = true; s.set({stroke: 'white'}); });
             const originalBg = canvas.backgroundColor;
             canvas.backgroundColor = 'black';
             const maskBase64 = canvas.toDataURL({ format: 'png', multiplier: 1 });
 
             canvas.backgroundColor = originalBg;
-            baseImageRef.current.visible = true;
+            allObjects.forEach(o => o.visible = true);
             strokes.forEach(s => s.set({stroke: 'rgba(255,0,0,0.5)'}));
             canvas.requestRenderAll();
-
             return { image: imageBase64, mask: maskBase64 };
         },
         setResultImage: async (dataUrl: string) => {
+            // ... same result loading logic ...
             if (!canvasInstance.current) return;
             const canvas = canvasInstance.current;
             try {
                 const img = await fabric.FabricImage.fromURL(dataUrl);
                 const canvasWidth = canvas.width!;
-
-                // Scale and position
                 img.scaleToWidth(canvasWidth);
                 canvas.centerObject(img);
-
-                // Lock it for Review Mode
                 img.selectable = false;
                 img.evented = false;
-
                 canvas.add(img);
-                tempResultRef.current = img; // Track it
+                tempResultRef.current = img;
                 canvas.requestRenderAll();
             } catch (e) { console.error(e); }
         },
@@ -84,26 +183,35 @@ export default function FabricCanvas({ tool, onLoaded }: FabricCanvasProps) {
             if (!canvasInstance.current || !tempResultRef.current) return;
             canvasInstance.current.remove(tempResultRef.current);
             tempResultRef.current = null;
-            canvasInstance.current.requestRenderAll();
+            canvasInstance.current.requestRenderAll()
         },
         commitResult: () => {
             if (!canvasInstance.current || !tempResultRef.current) return;
-            // Make it permanent and movable
+            const canvas = canvasInstance.current;
+
+            // 1. Lock History temporarily to batch operations
+            isHistoryLocked.current = true;
+
+            // 2. Finalize Image
             const img = tempResultRef.current;
             img.selectable = true;
             img.evented = true;
+            tempResultRef.current = null;
+            canvas.setActiveObject(img);
 
-            // If we want to replace the base image, we could do:
-            // baseImageRef.current = img;
-            // But for layers, let's just leave it on top.
+            // 3. Clear Mask (Paths) automatically
+            canvas.getObjects().forEach(obj => {
+                if (obj.type === 'path') canvas.remove(obj);
+            });
 
-            tempResultRef.current = null; // No longer temporary
-            canvasInstance.current.setActiveObject(img);
-            canvasInstance.current.requestRenderAll();
+            // 4. Unlock and Save ONCE
+            isHistoryLocked.current = false;
+            saveState(); // <--- SINGLE SAVE POINT
+
+            canvas.requestRenderAll();
         },
         toggleCompare: (showOriginal: boolean) => {
             if (!canvasInstance.current || !tempResultRef.current) return;
-            // If showOriginal is true, we HIDE the result
             tempResultRef.current.visible = !showOriginal;
             canvasInstance.current.requestRenderAll();
         },
@@ -111,17 +219,16 @@ export default function FabricCanvas({ tool, onLoaded }: FabricCanvasProps) {
             if (!canvasInstance.current) return;
             const link = document.createElement('a');
             link.download = `opendream-${Date.now()}.png`;
-            link.href = canvasInstance.current.toDataURL({ format: 'png', multiplier: 2 }); // High Quality
+            link.href = canvasInstance.current.toDataURL({ format: 'png', multiplier: 2 });
             document.body.appendChild(link);
             link.click();
             document.body.removeChild(link);
         }
     };
 
-    // Init Logic (Standard)
+    // Init Logic
     useEffect(() => {
         if (!canvasEl.current || !containerRef.current || canvasInstance.current) return;
-
         const canvas = new fabric.Canvas(canvasEl.current, {
             width: containerRef.current.clientWidth,
             height: containerRef.current.clientHeight,
@@ -130,7 +237,10 @@ export default function FabricCanvas({ tool, onLoaded }: FabricCanvasProps) {
         canvasInstance.current = canvas;
         if (onLoaded) onLoaded(api);
 
-        // Resize
+        // Events
+        canvas.on('object:modified', saveState);
+        canvas.on('path:created', saveState);
+
         const resizeObserver = new ResizeObserver(() => {
             if (!containerRef.current || !canvasInstance.current) return;
             canvasInstance.current.setDimensions({
@@ -140,7 +250,7 @@ export default function FabricCanvas({ tool, onLoaded }: FabricCanvasProps) {
         });
         resizeObserver.observe(containerRef.current);
 
-        // Zoom
+        // Zoom/Pan ... (Standard)
         canvas.on('mouse:wheel', function(opt) {
             const delta = opt.e.deltaY;
             let zoom = canvas.getZoom();
@@ -151,12 +261,9 @@ export default function FabricCanvas({ tool, onLoaded }: FabricCanvasProps) {
             opt.e.preventDefault();
             opt.e.stopPropagation();
         });
-
-        // Pan
         let isDragging = false;
         let lastPosX = 0;
         let lastPosY = 0;
-
         canvas.on('mouse:down', function(opt) {
             const evt = opt.e as unknown as MouseEvent;
             if (evt.altKey === true) {
@@ -183,7 +290,6 @@ export default function FabricCanvas({ tool, onLoaded }: FabricCanvasProps) {
                 isDragging = false;
             }
         });
-
         return () => {
             resizeObserver.disconnect();
             canvas.dispose();
@@ -191,48 +297,7 @@ export default function FabricCanvas({ tool, onLoaded }: FabricCanvasProps) {
         };
     }, []);
 
-    // Tool Logic (Standard)
-    useEffect(() => {
-        const canvas = canvasInstance.current;
-        if (!canvas) return;
-
-        setStatus(tool.toUpperCase());
-
-        if (tool === 'brush') {
-            canvas.isDrawingMode = true;
-            canvas.selection = false;
-            canvas.discardActiveObject();
-            const brush = new fabric.PencilBrush(canvas);
-            brush.color = 'rgba(255, 0, 0, 0.5)';
-            brush.width = 30;
-            canvas.freeDrawingBrush = brush;
-            canvas.defaultCursor = 'crosshair';
-            canvas.getObjects().forEach(obj => { obj.selectable = false; obj.evented = false; });
-        }
-        else if (tool === 'pan') {
-            canvas.isDrawingMode = false;
-            canvas.selection = false;
-            canvas.defaultCursor = 'grab';
-            canvas.getObjects().forEach(obj => { obj.selectable = false; obj.evented = false; });
-        }
-        else {
-            canvas.isDrawingMode = false;
-            canvas.selection = true;
-            canvas.defaultCursor = 'default';
-            canvas.getObjects().forEach(obj => {
-                if (obj.type === 'image') {
-                    // If we are in review mode (tempResult exists), we might want to keep things locked?
-                    // But the parent controls the 'tool', so we assume if tool=select, we want interaction.
-                    // The tempResult logic in setSelectable handles its own locking.
-                    obj.selectable = true;
-                    obj.evented = true;
-                } else {
-                    obj.selectable = false; obj.evented = false;
-                }
-            });
-        }
-        canvas.requestRenderAll();
-    }, [tool]);
+    useEffect(() => { applyToolSettings(tool); }, [tool]);
 
     const handleDrop = async (e: React.DragEvent) => {
         e.preventDefault();
@@ -253,7 +318,9 @@ export default function FabricCanvas({ tool, onLoaded }: FabricCanvasProps) {
                     img.scale(scale);
                     canvasInstance.current!.centerObject(img);
                     canvasInstance.current!.add(img);
-                    baseImageRef.current = img;
+                    history.current = [];
+                    historyIndex.current = -1;
+                    saveState(); // Initial State
                     canvasInstance.current!.setActiveObject(img);
                 } catch (err) { console.error(err); }
             };

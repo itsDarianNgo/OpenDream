@@ -1,6 +1,6 @@
 "use client";
 
-import { Brush, Eraser, Hand, Move, Send, Sparkles, Check, X, Eye } from 'lucide-react';
+import { Brush, Eraser, Hand, Move, Send, Sparkles, Check, X, Eye, Undo, Redo } from 'lucide-react';
 import { useEditorStore } from '../../store/useEditorStore';
 
 export default function BottomControls() {
@@ -9,6 +9,7 @@ export default function BottomControls() {
         prompt, setPrompt,
         isGenerating, setIsGenerating,
         reviewMode, setReviewMode,
+        canUndo, canRedo, // <--- FROM STORE
         canvasController
     } = useEditorStore();
 
@@ -52,7 +53,6 @@ export default function BottomControls() {
 
     const handleAccept = () => {
         canvasController?.commitResult();
-        canvasController?.clearMask();
         setReviewMode(false);
         setPrompt("");
     };
@@ -65,8 +65,29 @@ export default function BottomControls() {
     return (
         <div className="absolute bottom-0 left-0 right-0 z-40 flex flex-col gap-3 p-4 pointer-events-none">
 
-            {/* Tools Dock */}
-            <div className={`flex justify-center transition-all duration-300 ${reviewMode ? 'opacity-0 translate-y-4' : 'opacity-100'}`}>
+            {/* History & Tools Row */}
+            <div className={`flex justify-center gap-4 transition-all duration-300 ${reviewMode ? 'opacity-0 translate-y-4' : 'opacity-100'}`}>
+
+                {/* History Pill */}
+                <div className="pointer-events-auto flex items-center gap-1 bg-black/60 backdrop-blur-xl border border-white/10 p-1.5 rounded-2xl shadow-2xl h-full">
+                    <button
+                        onClick={() => canvasController?.undo()}
+                        disabled={!canUndo}
+                        className={`p-3 rounded-xl transition-colors ${canUndo ? 'text-white hover:bg-white/10' : 'text-neutral-600'}`}
+                    >
+                        <Undo size={20} />
+                    </button>
+                    <div className="w-px h-6 bg-white/10 mx-1"></div>
+                    <button
+                        onClick={() => canvasController?.redo()}
+                        disabled={!canRedo}
+                        className={`p-3 rounded-xl transition-colors ${canRedo ? 'text-white hover:bg-white/10' : 'text-neutral-600'}`}
+                    >
+                        <Redo size={20} />
+                    </button>
+                </div>
+
+                {/* Tools Dock */}
                 <div className="pointer-events-auto flex items-center gap-1 bg-black/60 backdrop-blur-xl border border-white/10 p-1.5 rounded-2xl shadow-2xl">
                     <ToolButton icon={<Move size={20} />} active={activeTool === 'select'} onClick={() => setTool('select')} />
                     <ToolButton icon={<Hand size={20} />} active={activeTool === 'pan'} onClick={() => setTool('pan')} />
@@ -78,7 +99,7 @@ export default function BottomControls() {
                 </div>
             </div>
 
-            {/* Action Bar */}
+            {/* Action Bar (Prompt) */}
             <div className="pointer-events-auto">
                 {!reviewMode ? (
                     <div className="relative w-full max-w-lg mx-auto group">
