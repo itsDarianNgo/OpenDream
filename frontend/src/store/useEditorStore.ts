@@ -2,7 +2,7 @@ import { create } from 'zustand';
 import { CanvasController } from '../components/FabricCanvas';
 
 interface EditorState {
-    activeTool: 'select' | 'brush' | 'pan';
+    isEditing: boolean;
     maskMode: 'paint' | 'erase';
     prompt: string;
     isGenerating: boolean;
@@ -14,7 +14,7 @@ interface EditorState {
 
     canvasController: CanvasController | null;
 
-    setTool: (tool: 'select' | 'brush' | 'pan') => void;
+    setIsEditing: (isEditing: boolean) => void;
     setMaskMode: (mode: 'paint' | 'erase') => void;
     setPrompt: (prompt: string) => void;
     setIsGenerating: (isGenerating: boolean) => void;
@@ -24,7 +24,7 @@ interface EditorState {
 }
 
 export const useEditorStore = create<EditorState>((set) => ({
-    activeTool: 'select',
+    isEditing: false,
     maskMode: 'paint',
     prompt: '',
     isGenerating: false,
@@ -33,7 +33,7 @@ export const useEditorStore = create<EditorState>((set) => ({
     canRedo: false,
     canvasController: null,
 
-    setTool: (tool) => set({ activeTool: tool }),
+    setIsEditing: (isEditing) => set({ isEditing }),
     setMaskMode: (maskMode) => set({ maskMode }),
     setPrompt: (prompt) => set({ prompt }),
     setIsGenerating: (isGenerating) => set({ isGenerating }),

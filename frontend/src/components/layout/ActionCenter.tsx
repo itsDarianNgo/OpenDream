@@ -10,12 +10,16 @@ const cn = (...inputs: Parameters<typeof clsx>) => twMerge(clsx(...inputs));
 
 export default function ActionCenter() {
     const {
+        isEditing,
+        setIsEditing,
         prompt,
         setPrompt,
         isGenerating,
         setIsGenerating,
         reviewMode,
         setReviewMode,
+        maskMode,
+        setMaskMode,
         canvasController,
     } = useEditorStore();
 
@@ -38,6 +42,7 @@ export default function ActionCenter() {
             const result = await response.json();
             if (result.status === "success") {
                 await canvasController.setResultImage(result.image);
+                setIsEditing(false);
                 setReviewMode(true);
             } else {
                 throw new Error(result.detail || 'Generation failed');
@@ -47,24 +52,48 @@ export default function ActionCenter() {
         } finally {
             setIsGenerating(false);
         }
-    }, [prompt, canvasController, setIsGenerating, setReviewMode]);
+    }, [prompt, canvasController, setIsGenerating, setReviewMode, setIsEditing]);
 
     const handleAccept = () => {
         canvasController?.commitResult();
         canvasController?.clearMask();
+        setIsEditing(false);
         setReviewMode(false);
         setPrompt('');
     };
 
     const handleDiscard = () => {
         canvasController?.discardResult();
+        setIsEditing(false);
         setReviewMode(false);
     };
+
+    if (!reviewMode && !isEditing) return null;
 
     return (
         <div className="absolute left-0 right-0 bottom-24 sm:bottom-16 z-50 px-6 pointer-events-none flex justify-center">
             {!reviewMode ? (
                 <div className="pointer-events-auto w-full max-w-md flex flex-col gap-2">
+                    <div className="flex justify-end gap-2 text-[11px] uppercase tracking-[0.08em] font-semibold text-white/70">
+                        <button
+                            onClick={() => setMaskMode('paint')}
+                            className={cn(
+                                'px-3 py-1.5 rounded-full border border-white/10 transition-colors',
+                                maskMode === 'paint' ? 'bg-white text-black' : 'bg-white/10 hover:bg-white/20'
+                            )}
+                        >
+                            Brush
+                        </button>
+                        <button
+                            onClick={() => setMaskMode('erase')}
+                            className={cn(
+                                'px-3 py-1.5 rounded-full border border-white/10 transition-colors',
+                                maskMode === 'erase' ? 'bg-white text-black' : 'bg-white/10 hover:bg-white/20'
+                            )}
+                        >
+                            Erase
+                        </button>
+                    </div>
                     <div className="relative group transition-all duration-300 focus-within:-translate-y-40">
                         <div className="absolute inset-y-0 left-4 flex items-center pointer-events-none">
                             <Sparkles size={18} className="text-indigo-400" />
