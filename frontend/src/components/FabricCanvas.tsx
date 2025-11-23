@@ -27,6 +27,7 @@ export default function FabricCanvas({ tool, onLoaded }: FabricCanvasProps) {
     const canvasInstance = useRef<fabric.Canvas | null>(null);
     const baseImageRef = useRef<fabric.FabricImage | null>(null);
     const tempResultRef = useRef<fabric.FabricImage | null>(null);
+    const toolRef = useRef(tool);
 
     const history = useRef<string[]>([]);
     const historyIndex = useRef<number>(-1);
@@ -266,7 +267,7 @@ export default function FabricCanvas({ tool, onLoaded }: FabricCanvasProps) {
         let lastPosY = 0;
         canvas.on('mouse:down', function(opt) {
             const evt = opt.e as unknown as MouseEvent;
-            if (evt.altKey === true) {
+            if (evt.altKey === true || toolRef.current === 'pan') {
                 isDragging = true;
                 canvas.isDrawingMode = false;
                 lastPosX = evt.clientX;
@@ -290,14 +291,118 @@ export default function FabricCanvas({ tool, onLoaded }: FabricCanvasProps) {
                 isDragging = false;
             }
         });
+
+        const touchState = {
+            isTwoFinger: false,
+            lastMidpointClient: null as fabric.Point | null,
+            lastMidpointCanvas: null as fabric.Point | null,
+            initialDistance: 0,
+            initialZoom: 1,
+        };
+
+        const getTouchMidpoint = (t1: Touch, t2: Touch) => new fabric.Point(
+            (t1.clientX + t2.clientX) / 2,
+            (t1.clientY + t2.clientY) / 2,
+        );
+
+        const getTouchDistance = (t1: Touch, t2: Touch) => Math.hypot(
+            t2.clientX - t1.clientX,
+            t2.clientY - t1.clientY,
+        );
+
+        const getRelativePoint = (point: fabric.Point) => {
+            const rect = canvas.upperCanvasEl.getBoundingClientRect();
+            return new fabric.Point(point.x - rect.left, point.y - rect.top);
+        };
+
+        const handleTouchStart = (e: TouchEvent) => {
+            if (!canvas) return;
+            const { touches } = e;
+            if (touches.length === 2) {
+                e.preventDefault();
+                touchState.isTwoFinger = true;
+                touchState.initialDistance = getTouchDistance(touches[0], touches[1]);
+                touchState.initialZoom = canvas.getZoom();
+                const midpoint = getTouchMidpoint(touches[0], touches[1]);
+                touchState.lastMidpointClient = midpoint;
+                touchState.lastMidpointCanvas = getRelativePoint(midpoint);
+                canvas.isDrawingMode = false;
+                canvas.selection = false;
+            } else if (touches.length === 1 && toolRef.current === 'pan') {
+                e.preventDefault();
+                isDragging = true;
+                canvas.isDrawingMode = false;
+                lastPosX = touches[0].clientX;
+                lastPosY = touches[0].clientY;
+            } else if (touches.length === 1) {
+                e.preventDefault();
+            }
+        };
+
+        const handleTouchMove = (e: TouchEvent) => {
+            if (!canvas) return;
+            const { touches } = e;
+            if (touches.length === 2 && touchState.isTwoFinger && touchState.lastMidpointClient && touchState.lastMidpointCanvas) {
+                e.preventDefault();
+                const midpoint = getTouchMidpoint(touches[0], touches[1]);
+                const midpointCanvas = getRelativePoint(midpoint);
+                const vpt = canvas.viewportTransform!;
+                vpt[4] += midpoint.x - touchState.lastMidpointClient.x;
+                vpt[5] += midpoint.y - touchState.lastMidpointClient.y;
+                const distance = getTouchDistance(touches[0], touches[1]);
+                const zoom = Math.min(5, Math.max(0.1, touchState.initialZoom * (distance / touchState.initialDistance)));
+                canvas.zoomToPoint(midpointCanvas, zoom);
+                canvas.requestRenderAll();
+                touchState.lastMidpointClient = midpoint;
+                touchState.lastMidpointCanvas = midpointCanvas;
+            } else if (touches.length === 1 && isDragging) {
+                e.preventDefault();
+                const touch = touches[0];
+                const vpt = canvas.viewportTransform!;
+                vpt[4] += touch.clientX - lastPosX;
+                vpt[5] += touch.clientY - lastPosY;
+                canvas.requestRenderAll();
+                lastPosX = touch.clientX;
+                lastPosY = touch.clientY;
+            }
+        };
+
+        const handleTouchEnd = (e: TouchEvent) => {
+            if (!canvas) return;
+            if (touchState.isTwoFinger && e.touches.length < 2) {
+                touchState.isTwoFinger = false;
+                touchState.lastMidpointClient = null;
+                touchState.lastMidpointCanvas = null;
+                applyToolSettings(toolRef.current);
+            }
+            if (isDragging && e.touches.length === 0) {
+                canvas.setViewportTransform(canvas.viewportTransform!);
+                isDragging = false;
+                applyToolSettings(toolRef.current);
+            }
+        };
+
+        const upperCanvas = canvas.upperCanvasEl;
+        upperCanvas.addEventListener('touchstart', handleTouchStart, { passive: false });
+        upperCanvas.addEventListener('touchmove', handleTouchMove, { passive: false });
+        upperCanvas.addEventListener('touchend', handleTouchEnd, { passive: false });
+        upperCanvas.addEventListener('touchcancel', handleTouchEnd, { passive: false });
+
         return () => {
             resizeObserver.disconnect();
+            upperCanvas.removeEventListener('touchstart', handleTouchStart);
+            upperCanvas.removeEventListener('touchmove', handleTouchMove);
+            upperCanvas.removeEventListener('touchend', handleTouchEnd);
+            upperCanvas.removeEventListener('touchcancel', handleTouchEnd);
             canvas.dispose();
             canvasInstance.current = null;
         };
     }, []);
 
-    useEffect(() => { applyToolSettings(tool); }, [tool]);
+    useEffect(() => {
+        toolRef.current = tool;
+        applyToolSettings(tool);
+    }, [tool]);
 
     const handleDrop = async (e: React.DragEvent) => {
         e.preventDefault();
@@ -331,7 +436,7 @@ export default function FabricCanvas({ tool, onLoaded }: FabricCanvasProps) {
     return (
         <div
             ref={containerRef}
-            className="w-full h-full relative bg-neutral-900 overflow-hidden"
+            className="w-full h-full relative bg-neutral-900 overflow-hidden touch-none"
             onDrop={handleDrop}
             onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); }}
         >
