@@ -338,7 +338,7 @@ export default function FabricCanvas({ isPainting, onLoaded }: FabricCanvasProps
             }
             img.selectable = false;
             img.evented = false;
-            canvas.sendToBack(img);
+            canvas.sendObjectToBack(img);
             tempResultRef.current = null;
             baseImageRef.current = img;
             fitImageToViewport();
