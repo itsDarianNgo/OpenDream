@@ -96,9 +96,13 @@ export default function FabricCanvas({ isPainting, onLoaded }: FabricCanvasProps
         const canvasWidth = container.clientWidth;
         const canvasHeight = container.clientHeight;
 
+        const scaledWidth = image.getScaledWidth?.() ?? image.width ?? 0;
+        const scaledHeight = image.getScaledHeight?.() ?? image.height ?? 0;
+        if (!scaledWidth || !scaledHeight) return;
+
         canvas.setDimensions({ width: canvasWidth, height: canvasHeight });
 
-        const minZoom = Math.min(canvasWidth / image.width!, canvasHeight / image.height!);
+        const minZoom = Math.min(canvasWidth / scaledWidth, canvasHeight / scaledHeight);
         minZoomRef.current = minZoom;
 
         const viewport: fabric.TMat2D = [
@@ -106,8 +110,8 @@ export default function FabricCanvas({ isPainting, onLoaded }: FabricCanvasProps
             0,
             0,
             minZoom,
-            (canvasWidth - image.width! * minZoom) / 2,
-            (canvasHeight - image.height! * minZoom) / 2,
+            (canvasWidth - scaledWidth * minZoom) / 2,
+            (canvasHeight - scaledHeight * minZoom) / 2,
         ];
 
         canvas.setViewportTransform(viewport);
