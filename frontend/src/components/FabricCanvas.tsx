@@ -28,24 +28,53 @@ export default function FabricCanvas({ tool, onLoaded }: FabricCanvasProps) {
     const baseImageRef = useRef<fabric.FabricImage | null>(null);
     const tempResultRef = useRef<fabric.FabricImage | null>(null);
     const toolRef = useRef(tool);
+    const maskModeRef = useRef<'paint' | 'erase'>('paint');
 
     const history = useRef<string[]>([]);
     const historyIndex = useRef<number>(-1);
     const isHistoryLocked = useRef(false);
 
     const setHistoryState = useEditorStore((state) => state.setHistoryState);
+    const maskMode = useEditorStore((state) => state.maskMode);
     const [status, setStatus] = useState("Init");
 
-    const withNormalizedViewport = <T,>(canvas: fabric.Canvas, cb: () => T) => {
+    const normalizeViewport = <T,>(canvas: fabric.Canvas, cb: () => T) => {
         const currentVpt = canvas.viewportTransform ? ([...canvas.viewportTransform] as fabric.TMat2D) : null;
-        if (currentVpt) {
-            canvas.setViewportTransform([1, 0, 0, 1, 0, 0]);
-        }
+        if (!currentVpt) return cb();
+
+        canvas.setViewportTransform([1, 0, 0, 1, 0, 0]);
+        canvas.calcOffset();
+        canvas.getObjects().forEach((obj) => obj.setCoords());
+
         const result = cb();
-        if (currentVpt) {
-            canvas.setViewportTransform(currentVpt);
-        }
+
+        canvas.setViewportTransform(currentVpt);
+        canvas.calcOffset();
+        canvas.getObjects().forEach((obj) => obj.setCoords());
+
         return result;
+    };
+
+    const getObjectBounds = (obj: fabric.Object, canvas: fabric.Canvas) => {
+        obj.setCoords();
+        const vpt = canvas.viewportTransform ?? [1, 0, 0, 1, 0, 0];
+        const inverse = fabric.util.invertTransform(vpt);
+        const { tl, tr, br, bl } = obj.aCoords!;
+        const points = [tl, tr, br, bl].map((pt) => fabric.util.transformPoint(pt, inverse));
+        const xs = points.map((p) => p.x);
+        const ys = points.map((p) => p.y);
+
+        const minX = Math.min(...xs);
+        const minY = Math.min(...ys);
+        const maxX = Math.max(...xs);
+        const maxY = Math.max(...ys);
+
+        return {
+            left: minX,
+            top: minY,
+            width: Math.max(1, maxX - minX),
+            height: Math.max(1, maxY - minY),
+        };
     };
 
     const getBaseImageRect = () => {
@@ -53,22 +82,16 @@ export default function FabricCanvas({ tool, onLoaded }: FabricCanvasProps) {
         const base = baseImageRef.current;
         if (!canvas || !base) return null;
 
-        return withNormalizedViewport(canvas, () => {
-            const rect = base.getBoundingRect();
-            return {
-                left: Math.max(0, Math.floor(rect.left)),
-                top: Math.max(0, Math.floor(rect.top)),
-                width: Math.max(1, Math.min(canvas.getWidth(), Math.ceil(rect.width))),
-                height: Math.max(1, Math.min(canvas.getHeight(), Math.ceil(rect.height))),
-            };
-        });
-        const rect = base.getBoundingRect();
-        return {
-            left: Math.max(0, Math.floor(rect.left)),
-            top: Math.max(0, Math.floor(rect.top)),
-            width: Math.max(1, Math.min(canvas.getWidth(), Math.ceil(rect.width))),
-            height: Math.max(1, Math.min(canvas.getHeight(), Math.ceil(rect.height))),
-        };
+        return getObjectBounds(base, canvas);
+    };
+
+    const rectanglesOverlap = (a: { left: number; top: number; width: number; height: number }, b: { left: number; top: number; width: number; height: number }) => {
+        return (
+            a.left < b.left + b.width &&
+            a.left + a.width > b.left &&
+            a.top < b.top + b.height &&
+            a.top + a.height > b.top
+        );
     };
 
     // --- HISTORY ENGINE ---
@@ -105,6 +128,25 @@ export default function FabricCanvas({ tool, onLoaded }: FabricCanvasProps) {
         setHistoryState(canUndo, canRedo);
     };
 
+    const handlePathCreated = (opt: fabric.TEvent<MouseEvent> & { path?: fabric.Path }) => {
+        const canvas = canvasInstance.current;
+        const path = opt.path as fabric.Path | undefined;
+        if (!canvas || !path) return;
+
+        if (maskModeRef.current === 'erase') {
+            const eraseBounds = path.getBoundingRect();
+            const paths = canvas.getObjects().filter((o) => o.type === 'path' && o !== path) as fabric.Path[];
+            const toRemove = paths.filter((p) => rectanglesOverlap(p.getBoundingRect(), eraseBounds));
+            toRemove.forEach((p) => canvas.remove(p));
+            canvas.remove(path);
+            canvas.requestRenderAll();
+            if (toRemove.length > 0) saveState();
+            return;
+        }
+
+        saveState();
+    };
+
     const loadHistoryState = async (index: number) => {
         if (!canvasInstance.current) return;
         isHistoryLocked.current = true;
@@ -138,8 +180,10 @@ export default function FabricCanvas({ tool, onLoaded }: FabricCanvasProps) {
             canvas.selection = false;
             canvas.discardActiveObject();
             const brush = new fabric.PencilBrush(canvas);
-            brush.color = 'rgba(255, 0, 0, 0.5)';
+            brush.color = maskModeRef.current === 'erase' ? 'rgba(30,30,30,0.0001)' : 'rgba(255, 0, 0, 0.5)';
             brush.width = 30;
+            brush.strokeLineCap = 'round';
+            brush.strokeLineJoin = 'round';
             canvas.freeDrawingBrush = brush;
             canvas.defaultCursor = 'crosshair';
             canvas.getObjects().forEach(o => { o.selectable = false; o.evented = false; });
@@ -185,10 +229,17 @@ export default function FabricCanvas({ tool, onLoaded }: FabricCanvasProps) {
             const images = canvas.getObjects().filter(o => o.type === 'image');
             if (images.length === 0) return null;
 
-            const result = withNormalizedViewport(canvas, () => {
+            const result = normalizeViewport(canvas, () => {
                 const cropRect = getBaseImageRect();
                 const exportOptions: fabric.TDataUrlOptions = cropRect
-                    ? { format: 'png', multiplier: 1, left: cropRect.left, top: cropRect.top, width: cropRect.width, height: cropRect.height }
+                    ? {
+                        format: 'png',
+                        multiplier: 1,
+                        left: Math.round(cropRect.left),
+                        top: Math.round(cropRect.top),
+                        width: Math.round(cropRect.width),
+                        height: Math.round(cropRect.height),
+                    }
                     : { format: 'png', multiplier: 1 };
 
                 const strokes = canvas.getObjects().filter(o => o.type === 'path');
@@ -207,21 +258,6 @@ export default function FabricCanvas({ tool, onLoaded }: FabricCanvasProps) {
                 strokes.forEach(s => s.set({stroke: 'rgba(255,0,0,0.5)'}));
                 return { image: imageBase64, mask: maskBase64 };
             });
-            const cropRect = getBaseImageRect();
-            const exportOptions: fabric.TDataUrlOptions = cropRect
-                ? { format: 'png', multiplier: 1, left: cropRect.left, top: cropRect.top, width: cropRect.width, height: cropRect.height }
-                : { format: 'png', multiplier: 1 };
-
-            const strokes = canvas.getObjects().filter(o => o.type === 'path');
-            strokes.forEach(s => s.visible = false);
-            const imageBase64 = canvas.toDataURL(exportOptions);
-
-            const allObjects = canvas.getObjects();
-            allObjects.forEach(o => o.visible = false);
-            strokes.forEach(s => { s.visible = true; s.set({stroke: 'white'}); });
-            const originalBg = canvas.backgroundColor;
-            canvas.backgroundColor = 'black';
-            const maskBase64 = canvas.toDataURL(exportOptions);
 
             canvas.requestRenderAll();
             return result;
@@ -245,15 +281,6 @@ export default function FabricCanvas({ tool, onLoaded }: FabricCanvasProps) {
                         originY: 'center',
                         scaleX: scale,
                         scaleY: scale,
-                const cropRect = getBaseImageRect();
-                if (cropRect) {
-                    img.set({
-                        left: cropRect.left + cropRect.width / 2,
-                        top: cropRect.top + cropRect.height / 2,
-                        originX: 'center',
-                        originY: 'center',
-                        scaleX: 1,
-                        scaleY: 1,
                         angle: 0,
                     });
                     img.setCoords();
@@ -332,7 +359,7 @@ export default function FabricCanvas({ tool, onLoaded }: FabricCanvasProps) {
 
         // Events
         canvas.on('object:modified', saveState);
-        canvas.on('path:created', saveState);
+        canvas.on('path:created', handlePathCreated as unknown as any);
 
         const resizeObserver = new ResizeObserver(() => {
             if (!containerRef.current || !canvasInstance.current) return;
@@ -495,6 +522,11 @@ export default function FabricCanvas({ tool, onLoaded }: FabricCanvasProps) {
         toolRef.current = tool;
         applyToolSettings(tool);
     }, [tool]);
+
+    useEffect(() => {
+        maskModeRef.current = maskMode;
+        if (toolRef.current === 'brush') applyToolSettings('brush');
+    }, [maskMode]);
 
     const handleDrop = async (e: React.DragEvent) => {
         e.preventDefault();
