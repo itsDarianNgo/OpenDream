@@ -2,7 +2,7 @@
 
 import { twMerge } from 'tailwind-merge';
 import clsx from 'clsx';
-import { Brush, Eraser, Hand, Move, Undo, Redo, Download, Trash2 } from 'lucide-react';
+import { Brush, Eraser, Hand, Move, Undo, Redo, Download, Trash2, Image } from 'lucide-react';
 import { useEditorStore } from '../../store/useEditorStore';
 
 const cn = (...inputs: Parameters<typeof clsx>) => twMerge(clsx(...inputs));
@@ -24,6 +24,11 @@ export default function SideToolbar() {
     const setMaskTool = (mode: 'paint' | 'erase') => {
         setTool('brush');
         setMaskMode(mode);
+    };
+
+    const triggerPhotoPicker = () => {
+        const input = document.getElementById('canvas-photo-input') as HTMLInputElement | null;
+        input?.click();
     };
 
     return (
@@ -67,7 +72,14 @@ export default function SideToolbar() {
                 />
             </div>
 
-            <div className="pointer-events-auto mt-2">
+            <div className="pointer-events-auto mt-2 flex gap-2">
+                <button
+                    onClick={triggerPhotoPicker}
+                    className="w-10 h-10 flex items-center justify-center rounded-full bg-indigo-500 text-white shadow-lg border border-white/10 hover:bg-indigo-400 transition-colors"
+                    title="Add Photo"
+                >
+                    <Image size={18} />
+                </button>
                 <button
                     onClick={() => canvasController?.downloadCanvas()}
                     className="w-10 h-10 flex items-center justify-center rounded-full bg-neutral-800 text-white shadow-lg border border-white/10 hover:bg-white/10 transition-colors"
