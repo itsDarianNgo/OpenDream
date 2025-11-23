@@ -14,6 +14,7 @@ export interface CanvasController {
     downloadCanvas: () => void;
     undo: () => void;
     redo: () => void;
+    loadImageFromFile: (file: File) => Promise<void>;
 }
 
 interface FabricCanvasProps {
@@ -343,6 +344,43 @@ export default function FabricCanvas({ tool, onLoaded }: FabricCanvasProps) {
             document.body.appendChild(link);
             link.click();
             document.body.removeChild(link);
+        },
+        loadImageFromFile: async (file: File) => {
+            if (!canvasInstance.current || !file.type.startsWith('image/')) return;
+            const canvas = canvasInstance.current;
+            tempResultRef.current = null;
+
+            const dataUrl = await new Promise<string | null>((resolve, reject) => {
+                const reader = new FileReader();
+                reader.onload = (event) => resolve((event.target?.result as string) ?? null);
+                reader.onerror = () => reject(reader.error);
+                reader.readAsDataURL(file);
+            }).catch((err) => {
+                console.error(err);
+                return null;
+            });
+
+            if (!dataUrl) return;
+
+            try {
+                canvas.clear();
+                canvas.backgroundColor = '#1e1e1e';
+                const img = await fabric.FabricImage.fromURL(dataUrl);
+                const canvasWidth = canvas.width!;
+                const canvasHeight = canvas.height!;
+                const scale = Math.min((canvasWidth * 0.8) / img.width!, (canvasHeight * 0.8) / img.height!);
+                img.scale(scale);
+                canvas.centerObject(img);
+                canvas.add(img);
+                baseImageRef.current = img;
+                history.current = [];
+                historyIndex.current = -1;
+                saveState(); // Initial State
+                canvas.setActiveObject(img);
+                canvas.requestRenderAll();
+            } catch (err) {
+                console.error(err);
+            }
         }
     };
 
@@ -531,31 +569,8 @@ export default function FabricCanvas({ tool, onLoaded }: FabricCanvasProps) {
     const handleDrop = async (e: React.DragEvent) => {
         e.preventDefault();
         e.stopPropagation();
-        if (!canvasInstance.current) return;
         const file = e.dataTransfer.files[0];
-        if (file && file.type.startsWith('image/')) {
-            const reader = new FileReader();
-            reader.onload = async (f) => {
-                const data = f.target?.result as string;
-                try {
-                    canvasInstance.current!.clear();
-                    canvasInstance.current!.backgroundColor = '#1e1e1e';
-                    const img = await fabric.FabricImage.fromURL(data);
-                    const canvasWidth = canvasInstance.current!.width!;
-                    const canvasHeight = canvasInstance.current!.height!;
-                    const scale = Math.min((canvasWidth * 0.8) / img.width!, (canvasHeight * 0.8) / img.height!);
-                    img.scale(scale);
-                    canvasInstance.current!.centerObject(img);
-                    canvasInstance.current!.add(img);
-                    baseImageRef.current = img;
-                    history.current = [];
-                    historyIndex.current = -1;
-                    saveState(); // Initial State
-                    canvasInstance.current!.setActiveObject(img);
-                } catch (err) { console.error(err); }
-            };
-            reader.readAsDataURL(file);
-        }
+        if (file) await api.loadImageFromFile(file);
     };
 
     return (
