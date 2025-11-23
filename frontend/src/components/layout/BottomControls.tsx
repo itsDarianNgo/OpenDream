@@ -6,6 +6,7 @@ import { useEditorStore } from '../../store/useEditorStore';
 export default function BottomControls() {
     const {
         activeTool, setTool,
+        maskMode, setMaskMode,
         prompt, setPrompt,
         isGenerating, setIsGenerating,
         reviewMode, setReviewMode,
@@ -92,10 +93,17 @@ export default function BottomControls() {
                     <ToolButton icon={<Move size={20} />} active={activeTool === 'select'} onClick={() => setTool('select')} />
                     <ToolButton icon={<Hand size={20} />} active={activeTool === 'pan'} onClick={() => setTool('pan')} />
                     <div className="w-px h-6 bg-white/10 mx-1"></div>
-                    <ToolButton icon={<Brush size={20} />} active={activeTool === 'brush'} onClick={() => setTool('brush')} highlight />
-                    <button onClick={() => canvasController?.clearMask()} className="p-3 rounded-xl text-neutral-400 hover:text-white hover:bg-white/10 transition-colors">
-                        <Eraser size={20} />
-                    </button>
+                    <ToolButton
+                        icon={<Brush size={20} />}
+                        active={activeTool === 'brush' && maskMode === 'paint'}
+                        onClick={() => { setTool('brush'); setMaskMode('paint'); }}
+                        highlight
+                    />
+                    <ToolButton
+                        icon={<Eraser size={20} />}
+                        active={activeTool === 'brush' && maskMode === 'erase'}
+                        onClick={() => { setTool('brush'); setMaskMode('erase'); }}
+                    />
                 </div>
             </div>
 
