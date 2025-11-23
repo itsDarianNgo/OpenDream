@@ -23,6 +23,11 @@ export default function SideToolbar() {
         input?.click();
     };
 
+    const triggerPhotoPicker = () => {
+        const input = document.getElementById('canvas-photo-input') as HTMLInputElement | null;
+        input?.click();
+    };
+
     return (
         <div className="absolute top-4 right-4 z-40 flex flex-col gap-4 pointer-events-none">
             <div className="pointer-events-auto flex flex-col gap-1 bg-black/40 backdrop-blur-xl border border-white/10 p-1.5 rounded-2xl shadow-lg">
