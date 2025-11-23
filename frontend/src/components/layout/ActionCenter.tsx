@@ -62,7 +62,7 @@ export default function ActionCenter() {
     };
 
     return (
-        <div className="absolute bottom-0 left-0 right-0 z-50 p-6 pointer-events-none flex justify-center">
+        <div className="absolute left-0 right-0 bottom-24 sm:bottom-16 z-50 px-6 pointer-events-none flex justify-center">
             {!reviewMode ? (
                 <div className="pointer-events-auto w-full max-w-md flex flex-col gap-2">
                     <div className="relative group transition-all duration-300 focus-within:-translate-y-40">
