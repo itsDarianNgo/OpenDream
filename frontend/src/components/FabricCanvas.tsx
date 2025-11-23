@@ -18,18 +18,18 @@ export interface CanvasController {
 }
 
 interface FabricCanvasProps {
-    tool: 'select' | 'brush' | 'pan';
+    isPainting: boolean;
     onLoaded: (controller: CanvasController) => void;
 }
 
-export default function FabricCanvas({ tool, onLoaded }: FabricCanvasProps) {
+export default function FabricCanvas({ isPainting, onLoaded }: FabricCanvasProps) {
     const canvasEl = useRef<HTMLCanvasElement>(null);
     const containerRef = useRef<HTMLDivElement>(null);
     const canvasInstance = useRef<fabric.Canvas | null>(null);
     const baseImageRef = useRef<fabric.FabricImage | null>(null);
     const tempResultRef = useRef<fabric.FabricImage | null>(null);
-    const toolRef = useRef(tool);
     const maskModeRef = useRef<'paint' | 'erase'>('paint');
+    const minZoomRef = useRef(1);
 
     const history = useRef<string[]>([]);
     const historyIndex = useRef<number>(-1);
@@ -84,6 +84,34 @@ export default function FabricCanvas({ tool, onLoaded }: FabricCanvasProps) {
         if (!canvas || !base) return null;
 
         return getObjectBounds(base, canvas);
+    };
+
+    const fitImageToViewport = () => {
+        const canvas = canvasInstance.current;
+        const container = containerRef.current;
+        const image = baseImageRef.current;
+
+        if (!canvas || !container || !image) return;
+
+        const canvasWidth = container.clientWidth;
+        const canvasHeight = container.clientHeight;
+
+        canvas.setDimensions({ width: canvasWidth, height: canvasHeight });
+
+        const minZoom = Math.min(canvasWidth / image.width!, canvasHeight / image.height!);
+        minZoomRef.current = minZoom;
+
+        const viewport: fabric.TMat2D = [
+            minZoom,
+            0,
+            0,
+            minZoom,
+            (canvasWidth - image.width! * minZoom) / 2,
+            (canvasHeight - image.height! * minZoom) / 2,
+        ];
+
+        canvas.setViewportTransform(viewport);
+        canvas.requestRenderAll();
     };
 
     const rectanglesOverlap = (a: { left: number; top: number; width: number; height: number }, b: { left: number; top: number; width: number; height: number }) => {
@@ -159,9 +187,10 @@ export default function FabricCanvas({ tool, onLoaded }: FabricCanvasProps) {
 
             const images = canvasInstance.current.getObjects().filter(o => o.type === 'image') as fabric.FabricImage[];
             baseImageRef.current = images[images.length - 1] ?? null;
+            fitImageToViewport();
 
-            // Re-apply tool settings logic since JSON load wipes it
-            applyToolSettings(tool);
+            // Re-apply interaction mode since JSON load wipes it
+            applyInteractionMode();
 
             historyIndex.current = index;
             updateHistoryUI();
@@ -172,36 +201,27 @@ export default function FabricCanvas({ tool, onLoaded }: FabricCanvasProps) {
         }
     };
 
-    const applyToolSettings = (currentTool: string) => {
+    const applyInteractionMode = () => {
         const canvas = canvasInstance.current;
         if (!canvas) return;
 
-        if (currentTool === 'brush') {
-            canvas.isDrawingMode = true;
-            canvas.selection = false;
-            canvas.discardActiveObject();
-            const brush = new fabric.PencilBrush(canvas);
-            brush.color = maskModeRef.current === 'erase' ? 'rgba(30,30,30,0.0001)' : 'rgba(255, 0, 0, 0.5)';
-            brush.width = 30;
-            brush.strokeLineCap = 'round';
-            brush.strokeLineJoin = 'round';
-            canvas.freeDrawingBrush = brush;
-            canvas.defaultCursor = 'crosshair';
-            canvas.getObjects().forEach(o => { o.selectable = false; o.evented = false; });
-        } else if (currentTool === 'pan') {
-            canvas.isDrawingMode = false;
-            canvas.selection = false;
-            canvas.defaultCursor = 'grab';
-            canvas.getObjects().forEach(o => { o.selectable = false; o.evented = false; });
-        } else {
-            canvas.isDrawingMode = false;
-            canvas.selection = true;
-            canvas.defaultCursor = 'default';
-            canvas.getObjects().forEach(o => {
-                if (o.type === 'image') { o.selectable = true; o.evented = true; }
-                else { o.selectable = false; o.evented = false; }
-            });
-        }
+        canvas.isDrawingMode = isPainting;
+        canvas.selection = false;
+        canvas.discardActiveObject();
+
+        const brush = new fabric.PencilBrush(canvas);
+        brush.color = maskModeRef.current === 'erase' ? 'rgba(30,30,30,0.0001)' : 'rgba(255, 0, 0, 0.5)';
+        brush.width = 30;
+        brush.strokeLineCap = 'round';
+        brush.strokeLineJoin = 'round';
+        canvas.freeDrawingBrush = brush;
+        canvas.defaultCursor = isPainting ? 'crosshair' : 'grab';
+
+        canvas.getObjects().forEach(o => {
+            o.selectable = false;
+            o.evented = false;
+        });
+
         canvas.requestRenderAll();
     };
 
@@ -314,11 +334,11 @@ export default function FabricCanvas({ tool, onLoaded }: FabricCanvasProps) {
 
             // 2. Finalize Image
             const img = tempResultRef.current;
-            img.selectable = true;
-            img.evented = true;
+            img.selectable = false;
+            img.evented = false;
             tempResultRef.current = null;
             baseImageRef.current = img;
-            canvas.setActiveObject(img);
+            fitImageToViewport();
 
             // 3. Clear Mask (Paths) automatically
             canvas.getObjects().forEach(obj => {
@@ -349,6 +369,7 @@ export default function FabricCanvas({ tool, onLoaded }: FabricCanvasProps) {
             if (!canvasInstance.current || !file.type.startsWith('image/')) return;
             const canvas = canvasInstance.current;
             tempResultRef.current = null;
+            const container = containerRef.current;
 
             const dataUrl = await new Promise<string | null>((resolve, reject) => {
                 const reader = new FileReader();
@@ -364,19 +385,20 @@ export default function FabricCanvas({ tool, onLoaded }: FabricCanvasProps) {
 
             try {
                 canvas.clear();
-                canvas.backgroundColor = '#1e1e1e';
+                canvas.backgroundColor = '#050507';
                 const img = await fabric.FabricImage.fromURL(dataUrl);
-                const canvasWidth = canvas.width!;
-                const canvasHeight = canvas.height!;
-                const scale = Math.min((canvasWidth * 0.8) / img.width!, (canvasHeight * 0.8) / img.height!);
-                img.scale(scale);
-                canvas.centerObject(img);
+                img.set({ selectable: false, evented: false, originX: 'left', originY: 'top' });
                 canvas.add(img);
+
+                if (container) {
+                    canvas.setDimensions({ width: container.clientWidth, height: container.clientHeight });
+                }
+
                 baseImageRef.current = img;
+                fitImageToViewport();
                 history.current = [];
                 historyIndex.current = -1;
                 saveState(); // Initial State
-                canvas.setActiveObject(img);
                 canvas.requestRenderAll();
             } catch (err) {
                 console.error(err);
@@ -390,7 +412,7 @@ export default function FabricCanvas({ tool, onLoaded }: FabricCanvasProps) {
         const canvas = new fabric.Canvas(canvasEl.current, {
             width: containerRef.current.clientWidth,
             height: containerRef.current.clientHeight,
-            backgroundColor: '#1e1e1e',
+            backgroundColor: '#050507',
         });
         canvasInstance.current = canvas;
         if (onLoaded) onLoaded(api);
@@ -401,20 +423,26 @@ export default function FabricCanvas({ tool, onLoaded }: FabricCanvasProps) {
 
         const resizeObserver = new ResizeObserver(() => {
             if (!containerRef.current || !canvasInstance.current) return;
+
             canvasInstance.current.setDimensions({
                 width: containerRef.current.clientWidth,
                 height: containerRef.current.clientHeight,
             });
+
+            const canvas = canvasInstance.current;
+            if (baseImageRef.current && Math.abs(canvas.getZoom() - minZoomRef.current) < 0.01) {
+                fitImageToViewport();
+            }
         });
         resizeObserver.observe(containerRef.current);
 
-        // Zoom/Pan ... (Standard)
+        // Zoom/Pan tuned for photo-first flow
         canvas.on('mouse:wheel', function(opt) {
             const delta = opt.e.deltaY;
             let zoom = canvas.getZoom();
             zoom *= 0.999 ** delta;
             if (zoom > 5) zoom = 5;
-            if (zoom < 0.1) zoom = 0.1;
+            if (zoom < minZoomRef.current) zoom = minZoomRef.current;
             canvas.zoomToPoint(new fabric.Point(opt.e.offsetX, opt.e.offsetY), zoom);
             opt.e.preventDefault();
             opt.e.stopPropagation();
@@ -424,7 +452,7 @@ export default function FabricCanvas({ tool, onLoaded }: FabricCanvasProps) {
         let lastPosY = 0;
         canvas.on('mouse:down', function(opt) {
             const evt = opt.e as unknown as MouseEvent;
-            if (evt.altKey === true || toolRef.current === 'pan') {
+            if (!isPainting && canvas.getZoom() > minZoomRef.current + 0.001) {
                 isDragging = true;
                 canvas.isDrawingMode = false;
                 lastPosX = evt.clientX;
@@ -485,7 +513,7 @@ export default function FabricCanvas({ tool, onLoaded }: FabricCanvasProps) {
                 touchState.lastMidpointCanvas = getRelativePoint(midpoint);
                 canvas.isDrawingMode = false;
                 canvas.selection = false;
-            } else if (touches.length === 1 && toolRef.current === 'pan') {
+            } else if (touches.length === 1 && !isPainting && canvas.getZoom() > minZoomRef.current + 0.001) {
                 e.preventDefault();
                 isDragging = true;
                 canvas.isDrawingMode = false;
@@ -507,7 +535,7 @@ export default function FabricCanvas({ tool, onLoaded }: FabricCanvasProps) {
                 vpt[4] += midpoint.x - touchState.lastMidpointClient.x;
                 vpt[5] += midpoint.y - touchState.lastMidpointClient.y;
                 const distance = getTouchDistance(touches[0], touches[1]);
-                const zoom = Math.min(5, Math.max(0.1, touchState.initialZoom * (distance / touchState.initialDistance)));
+                const zoom = Math.min(5, Math.max(minZoomRef.current, touchState.initialZoom * (distance / touchState.initialDistance)));
                 canvas.zoomToPoint(midpointCanvas, zoom);
                 canvas.requestRenderAll();
                 touchState.lastMidpointClient = midpoint;
@@ -530,12 +558,10 @@ export default function FabricCanvas({ tool, onLoaded }: FabricCanvasProps) {
                 touchState.isTwoFinger = false;
                 touchState.lastMidpointClient = null;
                 touchState.lastMidpointCanvas = null;
-                applyToolSettings(toolRef.current);
             }
             if (isDragging && e.touches.length === 0) {
                 canvas.setViewportTransform(canvas.viewportTransform!);
                 isDragging = false;
-                applyToolSettings(toolRef.current);
             }
         };
 
@@ -557,13 +583,12 @@ export default function FabricCanvas({ tool, onLoaded }: FabricCanvasProps) {
     }, []);
 
     useEffect(() => {
-        toolRef.current = tool;
-        applyToolSettings(tool);
-    }, [tool]);
+        applyInteractionMode();
+    }, [isPainting]);
 
     useEffect(() => {
         maskModeRef.current = maskMode;
-        if (toolRef.current === 'brush') applyToolSettings('brush');
+        applyInteractionMode();
     }, [maskMode]);
 
     const handleDrop = async (e: React.DragEvent) => {

@@ -14,7 +14,7 @@ const FabricCanvas = dynamic(() => import('../components/FabricCanvas'), {
 });
 
 export default function Home() {
-    const { activeTool, setCanvasController, canvasController } = useEditorStore();
+    const { isEditing, setIsEditing, setCanvasController, canvasController } = useEditorStore();
     const fileInputRef = useRef<HTMLInputElement>(null);
 
     const handleCanvasLoaded = (controller: CanvasController) => {
@@ -46,6 +46,14 @@ export default function Home() {
         fileInputRef.current?.click();
     };
 
+    const startMagicEdit = () => {
+        if (!canvasController) {
+            openPhotoPicker();
+            return;
+        }
+        setIsEditing(true);
+    };
+
     return (
         <main className="relative min-h-screen w-screen overflow-hidden bg-[#050507] text-white font-sans selection:bg-indigo-500/30">
             <input
@@ -75,18 +83,26 @@ export default function Home() {
                                 </div>
                                 <h1 className="text-2xl sm:text-3xl font-bold leading-tight">Bring any design to life</h1>
                             </div>
-                            <button
-                                onClick={openPhotoPicker}
-                                className="inline-flex items-center gap-2 rounded-full bg-indigo-500 px-4 py-2 text-sm font-semibold shadow-lg shadow-indigo-500/40 hover:bg-indigo-400 active:scale-[0.98] transition-all"
-                            >
-                                Start with a photo
-                            </button>
+                            <div className="flex items-center gap-2">
+                                <button
+                                    onClick={openPhotoPicker}
+                                    className="inline-flex items-center gap-2 rounded-full bg-indigo-500 px-4 py-2 text-sm font-semibold shadow-lg shadow-indigo-500/40 hover:bg-indigo-400 active:scale-[0.98] transition-all"
+                                >
+                                    Start with a photo
+                                </button>
+                                <button
+                                    onClick={startMagicEdit}
+                                    className="inline-flex items-center gap-2 rounded-full bg-white/10 px-4 py-2 text-sm font-semibold border border-white/20 hover:bg-white/20 active:scale-[0.98] transition-all"
+                                >
+                                    Magic Edit
+                                </button>
+                            </div>
                         </div>
                     </div>
 
                     <div className="relative flex-1 w-full max-w-6xl mx-auto">
                         <div className="relative h-full min-h-[420px] rounded-[28px] border border-white/10 bg-white/5 backdrop-blur-2xl shadow-2xl shadow-black/40 overflow-hidden">
-                            <FabricCanvas tool={activeTool} onLoaded={handleCanvasLoaded} />
+                            <FabricCanvas isPainting={isEditing} onLoaded={handleCanvasLoaded} />
                             <SideToolbar />
                             <ActionCenter />
                         </div>
