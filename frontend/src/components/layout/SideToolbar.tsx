@@ -20,12 +20,8 @@ export default function SideToolbar() {
 
     const triggerPhotoPicker = () => {
         const input = document.getElementById('canvas-photo-input') as HTMLInputElement | null;
-        input?.click();
-    };
-
-    const triggerPhotoPicker = () => {
-        const input = document.getElementById('canvas-photo-input') as HTMLInputElement | null;
-        input?.click();
+        if (!input) return;
+        input.click();
     };
 
     return (

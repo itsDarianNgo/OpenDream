@@ -289,20 +289,19 @@ export default function FabricCanvas({ isPainting, onLoaded }: FabricCanvasProps
             const canvas = canvasInstance.current;
             try {
                 const img = await fabric.FabricImage.fromURL(dataUrl);
-                const baseRect = getBaseImageRect();
                 const baseObj = baseImageRef.current;
-                if (baseRect && baseObj) {
-                    const scaleX = baseRect.width / img.width!;
-                    const scaleY = baseRect.height / img.height!;
-                    const scale = Math.min(scaleX, scaleY);
+                if (baseObj) {
+                    const center = baseObj.getCenterPoint();
+                    const baseScaleX = (baseObj.width ?? img.width!) * (baseObj.scaleX ?? 1) / img.width!;
+                    const baseScaleY = (baseObj.height ?? img.height!) * (baseObj.scaleY ?? 1) / img.height!;
                     img.set({
-                        left: baseRect.left + baseRect.width / 2,
-                        top: baseRect.top + baseRect.height / 2,
+                        left: center.x,
+                        top: center.y,
                         originX: 'center',
                         originY: 'center',
-                        scaleX: scale,
-                        scaleY: scale,
-                        angle: 0,
+                        scaleX: baseScaleX,
+                        scaleY: baseScaleY,
+                        angle: baseObj.angle ?? 0,
                     });
                     img.setCoords();
                 } else {
@@ -334,8 +333,12 @@ export default function FabricCanvas({ isPainting, onLoaded }: FabricCanvasProps
 
             // 2. Finalize Image
             const img = tempResultRef.current;
+            if (baseImageRef.current && baseImageRef.current !== img) {
+                canvas.remove(baseImageRef.current);
+            }
             img.selectable = false;
             img.evented = false;
+            canvas.sendObjectToBack(img);
             tempResultRef.current = null;
             baseImageRef.current = img;
             fitImageToViewport();
