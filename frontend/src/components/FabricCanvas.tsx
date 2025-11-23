@@ -79,6 +79,9 @@ export default function FabricCanvas({ tool, onLoaded }: FabricCanvasProps) {
             await canvasInstance.current.loadFromJSON(JSON.parse(json));
             canvasInstance.current.requestRenderAll();
 
+            const images = canvasInstance.current.getObjects().filter(o => o.type === 'image') as fabric.FabricImage[];
+            baseImageRef.current = images[images.length - 1] ?? null;
+
             // Re-apply tool settings logic since JSON load wipes it
             applyToolSettings(tool);
 
@@ -170,9 +173,27 @@ export default function FabricCanvas({ tool, onLoaded }: FabricCanvasProps) {
             const canvas = canvasInstance.current;
             try {
                 const img = await fabric.FabricImage.fromURL(dataUrl);
-                const canvasWidth = canvas.width!;
-                img.scaleToWidth(canvasWidth);
-                canvas.centerObject(img);
+                const baseImage = baseImageRef.current;
+                if (baseImage) {
+                    img.set({
+                        scaleX: baseImage.scaleX,
+                        scaleY: baseImage.scaleY,
+                        left: baseImage.left,
+                        top: baseImage.top,
+                        originX: baseImage.originX,
+                        originY: baseImage.originY,
+                        angle: baseImage.angle,
+                        flipX: baseImage.flipX,
+                        flipY: baseImage.flipY,
+                    });
+                    img.setCoords();
+                } else {
+                    const canvasWidth = canvas.width!;
+                    const canvasHeight = canvas.height!;
+                    const scale = Math.min((canvasWidth * 0.8) / img.width!, (canvasHeight * 0.8) / img.height!);
+                    img.scale(scale);
+                    canvas.centerObject(img);
+                }
                 img.selectable = false;
                 img.evented = false;
                 canvas.add(img);
@@ -198,6 +219,7 @@ export default function FabricCanvas({ tool, onLoaded }: FabricCanvasProps) {
             img.selectable = true;
             img.evented = true;
             tempResultRef.current = null;
+            baseImageRef.current = img;
             canvas.setActiveObject(img);
 
             // 3. Clear Mask (Paths) automatically
@@ -423,6 +445,7 @@ export default function FabricCanvas({ tool, onLoaded }: FabricCanvasProps) {
                     img.scale(scale);
                     canvasInstance.current!.centerObject(img);
                     canvasInstance.current!.add(img);
+                    baseImageRef.current = img;
                     history.current = [];
                     historyIndex.current = -1;
                     saveState(); // Initial State
