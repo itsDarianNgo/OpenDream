@@ -36,10 +36,32 @@ export default function FabricCanvas({ tool, onLoaded }: FabricCanvasProps) {
     const setHistoryState = useEditorStore((state) => state.setHistoryState);
     const [status, setStatus] = useState("Init");
 
+    const withNormalizedViewport = <T,>(canvas: fabric.Canvas, cb: () => T) => {
+        const currentVpt = canvas.viewportTransform ? ([...canvas.viewportTransform] as fabric.TMat2D) : null;
+        if (currentVpt) {
+            canvas.setViewportTransform([1, 0, 0, 1, 0, 0]);
+        }
+        const result = cb();
+        if (currentVpt) {
+            canvas.setViewportTransform(currentVpt);
+        }
+        return result;
+    };
+
     const getBaseImageRect = () => {
         const canvas = canvasInstance.current;
         const base = baseImageRef.current;
         if (!canvas || !base) return null;
+
+        return withNormalizedViewport(canvas, () => {
+            const rect = base.getBoundingRect();
+            return {
+                left: Math.max(0, Math.floor(rect.left)),
+                top: Math.max(0, Math.floor(rect.top)),
+                width: Math.max(1, Math.min(canvas.getWidth(), Math.ceil(rect.width))),
+                height: Math.max(1, Math.min(canvas.getHeight(), Math.ceil(rect.height))),
+            };
+        });
         const rect = base.getBoundingRect();
         return {
             left: Math.max(0, Math.floor(rect.left)),
@@ -163,6 +185,28 @@ export default function FabricCanvas({ tool, onLoaded }: FabricCanvasProps) {
             const images = canvas.getObjects().filter(o => o.type === 'image');
             if (images.length === 0) return null;
 
+            const result = withNormalizedViewport(canvas, () => {
+                const cropRect = getBaseImageRect();
+                const exportOptions: fabric.TDataUrlOptions = cropRect
+                    ? { format: 'png', multiplier: 1, left: cropRect.left, top: cropRect.top, width: cropRect.width, height: cropRect.height }
+                    : { format: 'png', multiplier: 1 };
+
+                const strokes = canvas.getObjects().filter(o => o.type === 'path');
+                strokes.forEach(s => s.visible = false);
+                const imageBase64 = canvas.toDataURL(exportOptions);
+
+                const allObjects = canvas.getObjects();
+                allObjects.forEach(o => o.visible = false);
+                strokes.forEach(s => { s.visible = true; s.set({stroke: 'white'}); });
+                const originalBg = canvas.backgroundColor;
+                canvas.backgroundColor = 'black';
+                const maskBase64 = canvas.toDataURL(exportOptions);
+
+                canvas.backgroundColor = originalBg;
+                allObjects.forEach(o => o.visible = true);
+                strokes.forEach(s => s.set({stroke: 'rgba(255,0,0,0.5)'}));
+                return { image: imageBase64, mask: maskBase64 };
+            });
             const cropRect = getBaseImageRect();
             const exportOptions: fabric.TDataUrlOptions = cropRect
                 ? { format: 'png', multiplier: 1, left: cropRect.left, top: cropRect.top, width: cropRect.width, height: cropRect.height }
@@ -179,11 +223,8 @@ export default function FabricCanvas({ tool, onLoaded }: FabricCanvasProps) {
             canvas.backgroundColor = 'black';
             const maskBase64 = canvas.toDataURL(exportOptions);
 
-            canvas.backgroundColor = originalBg;
-            allObjects.forEach(o => o.visible = true);
-            strokes.forEach(s => s.set({stroke: 'rgba(255,0,0,0.5)'}));
             canvas.requestRenderAll();
-            return { image: imageBase64, mask: maskBase64 };
+            return result;
         },
         setResultImage: async (dataUrl: string) => {
             // ... same result loading logic ...
@@ -191,6 +232,19 @@ export default function FabricCanvas({ tool, onLoaded }: FabricCanvasProps) {
             const canvas = canvasInstance.current;
             try {
                 const img = await fabric.FabricImage.fromURL(dataUrl);
+                const baseRect = getBaseImageRect();
+                const baseObj = baseImageRef.current;
+                if (baseRect && baseObj) {
+                    const scaleX = baseRect.width / img.width!;
+                    const scaleY = baseRect.height / img.height!;
+                    const scale = Math.min(scaleX, scaleY);
+                    img.set({
+                        left: baseRect.left + baseRect.width / 2,
+                        top: baseRect.top + baseRect.height / 2,
+                        originX: 'center',
+                        originY: 'center',
+                        scaleX: scale,
+                        scaleY: scale,
                 const cropRect = getBaseImageRect();
                 if (cropRect) {
                     img.set({
