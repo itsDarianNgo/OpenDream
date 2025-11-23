@@ -36,6 +36,19 @@ export default function FabricCanvas({ tool, onLoaded }: FabricCanvasProps) {
     const setHistoryState = useEditorStore((state) => state.setHistoryState);
     const [status, setStatus] = useState("Init");
 
+    const getBaseImageRect = () => {
+        const canvas = canvasInstance.current;
+        const base = baseImageRef.current;
+        if (!canvas || !base) return null;
+        const rect = base.getBoundingRect();
+        return {
+            left: Math.max(0, Math.floor(rect.left)),
+            top: Math.max(0, Math.floor(rect.top)),
+            width: Math.max(1, Math.min(canvas.getWidth(), Math.ceil(rect.width))),
+            height: Math.max(1, Math.min(canvas.getHeight(), Math.ceil(rect.height))),
+        };
+    };
+
     // --- HISTORY ENGINE ---
     const saveState = () => {
         if (isHistoryLocked.current || !canvasInstance.current) return;
@@ -150,16 +163,21 @@ export default function FabricCanvas({ tool, onLoaded }: FabricCanvasProps) {
             const images = canvas.getObjects().filter(o => o.type === 'image');
             if (images.length === 0) return null;
 
+            const cropRect = getBaseImageRect();
+            const exportOptions: fabric.TDataUrlOptions = cropRect
+                ? { format: 'png', multiplier: 1, left: cropRect.left, top: cropRect.top, width: cropRect.width, height: cropRect.height }
+                : { format: 'png', multiplier: 1 };
+
             const strokes = canvas.getObjects().filter(o => o.type === 'path');
             strokes.forEach(s => s.visible = false);
-            const imageBase64 = canvas.toDataURL({ format: 'png', multiplier: 1 });
+            const imageBase64 = canvas.toDataURL(exportOptions);
 
             const allObjects = canvas.getObjects();
             allObjects.forEach(o => o.visible = false);
             strokes.forEach(s => { s.visible = true; s.set({stroke: 'white'}); });
             const originalBg = canvas.backgroundColor;
             canvas.backgroundColor = 'black';
-            const maskBase64 = canvas.toDataURL({ format: 'png', multiplier: 1 });
+            const maskBase64 = canvas.toDataURL(exportOptions);
 
             canvas.backgroundColor = originalBg;
             allObjects.forEach(o => o.visible = true);
@@ -173,18 +191,16 @@ export default function FabricCanvas({ tool, onLoaded }: FabricCanvasProps) {
             const canvas = canvasInstance.current;
             try {
                 const img = await fabric.FabricImage.fromURL(dataUrl);
-                const baseImage = baseImageRef.current;
-                if (baseImage) {
+                const cropRect = getBaseImageRect();
+                if (cropRect) {
                     img.set({
-                        scaleX: baseImage.scaleX,
-                        scaleY: baseImage.scaleY,
-                        left: baseImage.left,
-                        top: baseImage.top,
-                        originX: baseImage.originX,
-                        originY: baseImage.originY,
-                        angle: baseImage.angle,
-                        flipX: baseImage.flipX,
-                        flipY: baseImage.flipY,
+                        left: cropRect.left + cropRect.width / 2,
+                        top: cropRect.top + cropRect.height / 2,
+                        originX: 'center',
+                        originY: 'center',
+                        scaleX: 1,
+                        scaleY: 1,
+                        angle: 0,
                     });
                     img.setCoords();
                 } else {
